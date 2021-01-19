@@ -9,4 +9,4 @@ https://github.com/CSBDeep/CSBDeep/
 https://github.com/juglab/n2v
 
 
-Use example :   Training_example.ipynb
+Use example :   Notebooks/MIBI
