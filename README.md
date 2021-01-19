@@ -1,9 +1,5 @@
-# ImPartial
-
---- Code for :
-
-## Partial Annotations for MultiplexCell Instance SegmentationNatalia Martinez1*, Guillermo Sapiro1, Allen Tannenbaum2,Travis Hollmann3, and Saad Nadeem
-
+# ImPartial:
+#### Partial Annotations for MultiplexCell Instance Segmentation
 
 --- Required packages are :
 
