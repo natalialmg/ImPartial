@@ -19,3 +19,12 @@ This github adapts code from Noise2Void and CARE frameworks: https://csbdeep.bio
 notebooks/MIBI_1CH/ (MIBI modality 1 channel nuclei)
 
 notebooks/MIBI_2CH/ (MIBI modality 2 channels cytoplasm + nuclei)
+
+--- Data examples in :
+
+data/MIBI_1Channel/ (MIBI modality 1 channel nuclei)
+
+data/MIBI_2Channel/ (MIBI modality 2 channels cytoplasm + nuclei)
+
+Each preprocessed image and corresponding labels is stored in a .npz file.
+Each dataset folder contains a file.csv with the specifications, more details in the preprocessing notebook examples.
