@@ -157,7 +157,7 @@ class BioSeg_DataWrapper(Sequence):
 
     @staticmethod
     def __get_stratified_coords2D__(coord_gen, box_size, shape):
-        box_count_y = int(np.ceil(shape[0] / box_size))
+        box_count_y = int(np.ceil(shape[0] / box_size)) #how many boxes enters in shape
         box_count_x = int(np.ceil(shape[1] / box_size))
         x_coords = []
         y_coords = []
@@ -203,11 +203,27 @@ class BioSeg_DataWrapper(Sequence):
             yield (np.random.rand() * boxsize, np.random.rand() * boxsize, np.random.rand() * boxsize)
 
 
+from patchify import patchify
+def subpatch_2D(X, shape):
+    for j in np.arange(X.shape[0]):
+        clean_patches = patchify(X[j,...], (shape[0], shape[1], X.shape[-1]), step=int(shape[0]/2))
+        clean_patches = np.reshape(clean_patches, (-1, shape[0], shape[1], X.shape[-1]))
+
+        if j == 0:
+            X_patch = np.array(clean_patches)
+        else:
+            X_patch = np.concatenate([X_patch,clean_patches],axis = 0)
+    return X_patch
 
 
 ## ToDO:!! Val data manipulator does not perform struct removal
 def manipulate_val_data(X_val, Y_val,value_manipulation, perc_pix=0.198, shape=(64, 64),chan_denoise = False):
+
+    ## X_val shape samples x w x h x ch
     dims = len(shape)
+
+    # self.range = np.array(self.X.shape[1:-1]) - np.array(self.shape)
+
     if dims == 2:
         box_size = np.round(np.sqrt(100/perc_pix)).astype(np.int)
         get_stratified_coords = BioSeg_DataWrapper.__get_stratified_coords2D__
@@ -217,15 +233,22 @@ def manipulate_val_data(X_val, Y_val,value_manipulation, perc_pix=0.198, shape=(
         get_stratified_coords = BioSeg_DataWrapper.__get_stratified_coords3D__
         rand_float = BioSeg_DataWrapper.__rand_float_coords3D__(box_size)
 
-    n_chan = X_val.shape[-1]
 
+
+    # idx = slice(0, X_val.shape[0])
+    # idx = self.perm[idx]
+    # if np.sum(np.abs(np.array(X_val[1:-1]) - np.array(shape))) != 0 :
+    #     X_val = subpatch_2D(X_val, shape)
+    #     Y_val = subpatch_2D(Y_val, shape)
+
+    n_chan = X_val.shape[-1]
     if not chan_denoise:
         Y_val *= 0
     else:
         Y_val[...,n_chan:] *= 0
     for j in tqdm(range(X_val.shape[0]), desc='Preparing validation data: '):
         coords = get_stratified_coords(rand_float, box_size=box_size,
-                                            shape=np.array(X_val.shape)[1:-1])
+                                            shape=np.array(X_val.shape)[1:-1])#shape) #
         for c in range(n_chan):
             indexing = (j,) + coords + (c,)
             indexing_mask = (j,) + coords + (c + n_chan,)

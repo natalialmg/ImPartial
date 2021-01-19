@@ -1,333 +1,334 @@
 import numpy as np
-from BioSeg_models import set_bioseg_model
-import tensorflow as tf
+import pandas as pd
 from csbdeep.utils import normalize
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+import skimage.measure as measure
+from sklearn.metrics import roc_auc_score
+import skimage.morphology as morphology
+from scipy.ndimage.morphology import binary_fill_holes
+from sklearn.metrics import f1_score,accuracy_score,jaccard_score
 
-def backfore_performance(z_gt,z_est,mask = None):
-    #z_gt and z_est are binary matrices, same shape
+def get_Yest_list(Y_est, tag='instance_0', ix_fg_list=[0],
+                  pnorm=True, tipo=0, pmin=0.01, pmax=99.9):
+    Y_est_list = []
 
-    if mask is not None:
-        z_est = z_est[mask>0]
-        z_gt = z_gt[mask>0]
+    if tipo == 0:
 
-    jacc_fore = np.sum(z_gt*z_est>0)/np.sum(z_est+z_gt>0)
-    jacc_back = np.sum((1-z_gt) * (1-z_est) > 0) / np.sum((1-z_est) + (1-z_gt) > 0)
-    TPR = np.sum(z_gt*z_est)/np.sum(z_gt)
-    TNR = np.sum((1-z_gt)*(1-z_est))/np.sum(1-z_gt)
-    FPR = np.sum((1-z_gt)*(z_est))/np.sum(1-z_gt)
-    FNR = np.sum((z_gt)*(1-z_est)) / np.sum(z_gt)
+        for i in np.arange(len(Y_est)):
 
-    return [jacc_fore,jacc_back,TPR,TNR,FPR,FNR]
+            start = True
+            for ix_fg in ix_fg_list:
+                if start:
+                    Y_est_i = Y_est[i][tag][:, :, :, ix_fg]
+                else:
+                    Y_est_i += Y_est[i][tag][:, :, :, ix_fg]
+                start = False
 
-def get_mask_best_th(y_pred, y_gt, stat='accuracy', th_list=np.linspace(0.01, 0.99, 20)):
+            if (Y_est[i][tag].shape[0] == 1):
+                Y_est_i = Y_est[i][tag][0, ...]
 
-    best_value = 0
-    best_th = 0
-
-    if stat is 'accuracy':
-        stat_func = accuracy_score
-
-    if stat is 'precision':
-        stat_func = precision_score
-
-    if stat is 'recall':
-        stat_func = recall_score
-
-    if stat is 'f1':
-        stat_func = f1_score
-
-    patience = 0
-    for th in th_list:
-        z_mask = np.array(y_pred)
-        z_mask = z_mask > th
-        #     jacc_fore,jacc_back,TPR,TNR,FPR,FNR = backfore_performance(filter_image,z_mask,mask = None)
-        #     print(jacc_fore,jacc_back,TPR,TNR,FPR,FNR)
-
-        score = stat_func(y_gt.flatten(), z_mask.flatten())
-        if score >= best_value:
-            best_value = score
-            best_th = th
-            patience = 0
-
-        else:
-            patience += 1
-            if (patience == 2):
-                break
-    return best_th
-    #     acc_score = accuracy_score
-    #     prec_score = precision_score(y_gt.flatten(), z_mask.flatten())
-    #     rec_score = recall_score(y_gt.flatten(), z_mask.flatten())
-    #     f1 = f1_score(y_gt.flatten(), z_mask.flatten())
-    #     rows.append([th, acc_score, prec_score, rec_score, f1])
-    # # print(acc_score,prec_score,rec_score,f1)
-    #
-    # pd_stats = pd.DataFrame(data=rows, columns=['th', 'accuracy', 'precision', 'recall', 'f1'])
-    # stat_val = pd_stats[stat].values
-    # ix_val = np.argmax(stat_val)
-    # th_final = pd_stats['th'].values[ix_val]
-    # #     print(th_final)
-    # print(pd_stats.iloc[ix_val])
-
-
-def get_FN(estimated_mask, labels_image, threshold=0.5):
-    ## Get FN labels considering a threshold on the inclusion on the obtained mask
-
-    FN = np.zeros_like(labels_image)
-    labels_unique = np.unique(labels_image)
-    for label in labels_unique:
-        if label != 0:  # 0 is assumed to be background
-            aux = np.zeros_like(labels_image)
-            aux[labels_image == label] = 1
-
-            intersection = aux * estimated_mask
-            area_ratio = np.sum(intersection) / np.sum(aux)
-            # print(area_ratio)
-            if area_ratio < threshold:
-                FN += aux-intersection.astype('int')
-    return FN
-
-def get_model_dic(save_data_full,key_names):
-    ix = 1
-    model_dic = {}
-    for key in key_names:
-        save_data = save_data_full[key]
-        input_dic = save_data['input_dic']
-        input_dic['load_tf_file'] = save_data['model_file']
-        print(key)
-        X = np.random.random([26,128,128,1])
-        model_dic[key],_ = set_bioseg_model([X], input_dic, train = False)
-        # print()
-        # print(model_dic)
-        model_dic[key].config.means=save_data['more_specs']['in_mean_std'][0]
-        model_dic[key].config.stds=save_data['more_specs']['in_mean_std'][1]
-        ix += 1
-    return model_dic
-
-def clip(array,vmin,vmax):
-    return np.minimum(np.maximum(array,vmin),vmax)
-
-def get_demix_prediction(config, y_pred):
-    nfore = config.n_fore_modes
-    nback = config.n_back_modes
-    nchannels = config.n_channel_in
-    ncomponents = config.n_components
-    ninstance = config.n_instance_seg
-    patch_size = (y_pred.shape[1],y_pred.shape[2])
-
-    ix = 0
-    foreback_pred = y_pred[..., ix:ix + (nfore + nback) * nchannels * ncomponents]
-    # print(foreback_pred.shape)
-
-    ix += (nfore + nback) * nchannels * ncomponents
-    instance_pred = y_pred[..., ix:ix + ninstance * 2]
-
-    ## Foreback mask !!
-    foreback_pred = tf.reshape(foreback_pred, [-1, patch_size[0], patch_size[1],
-                                               nchannels, nfore + nback, ncomponents])
-    foreback_mask = tf.nn.softmax(foreback_pred[..., 0], axis=-1)
-    # foreback_mask = tf.stack([(tf.reduce_sum(foreback_mask[..., 0:nfore], -1)),
-    #                           (tf.reduce_sum(foreback_mask[..., nfore:], -1))],
-    #                          axis=-1)
-    foreback_mask = foreback_mask.eval()
-    foreback_mask = np.reshape(foreback_mask, (foreback_mask.shape[0],
-                                               foreback_mask.shape[1],
-                                               foreback_mask.shape[2], -1))
-
-    ## Instance mask !!
-    instance_pred = tf.reshape(instance_pred, [-1, patch_size[0], patch_size[1],
-                                               ninstance, 2])
-    instance_mask = tf.nn.softmax(instance_pred, axis=-1)
-    instance_mask = instance_mask.eval()
-    instance_mask = np.reshape(instance_mask, (instance_mask.shape[0],
-                                               instance_mask.shape[1],
-                                               instance_mask.shape[2], -1))
-
-    print('foreback/Instance mask shape : ',foreback_mask.shape,instance_mask.shape)
-
-    return np.concatenate([foreback_mask, instance_mask], axis=-1)
-
-def get_out_model(model, raw_image_in):
-
-    # std
-    if model.config.normalizer == 'std':
-        mean_o = float(model.config.means[0])
-        std_o = float(model.config.stds[0])
+            if pnorm:
+                Y_est_i = normalize(Y_est_i, pmin=pmin, pmax=pmax, clip=True)
+            Y_est_list.append(Y_est_i)
     else:
-        mean_o = 0.0
-        std_o = 1.0
-        # print('No STD')
+        Y_est_aux = Y_est[tag]
+        for i in range(Y_est_aux.shape[0]):
+            start = True
+            for ix_fg in ix_fg_list:
+                if start:
+                    Y_est_i = Y_est_aux[i, :, :, ix_fg]
+                else:
+                    Y_est_i += Y_est_aux[i, :, :, ix_fg]
+                start = False
 
-    # output_image
-    # print(mean_o,std_o)
+            if pnorm:
+                Y_est_i = normalize(Y_est_i, pmin=pmin, pmax=pmax, clip=True)
+            Y_est_list.append(Y_est_i)
 
-    if len(raw_image_in.shape)>2:
-        y_pred = model.predict(raw_image_in, 'YXC')
-    else:
-        y_pred = model.predict((raw_image_in), 'YX')
+    return Y_est_list
 
-    if len(y_pred.shape) <= 3:
-        y_pred = y_pred[np.newaxis,...]
-    # print('y_pred :: ' ,y_pred.shape)
-    out_mask = get_demix_prediction(model.config, y_pred)
+def single_channel_evaluation(pd_data, model_evaluation, tag='channel_0',
+                              nbatch=4,group='test',ix_fg_list=[0], ix_label = None):
+    ## Get list of data ##
+    X_list = None
+    Y_gt_list = []
+    prefix_list = []
 
-    means_out = {}
-    stds_out = {}
-    # for i in range(out_model.shape[-2]):
-    #     means_out[i] = out_model[..., i,1].eval() * std_o + mean_o
-    #     # print(out_model[..., i,1])
-    #     stds_out[i] = np.exp(clip(out_model[..., i,2].eval(), -5, 5)) * std_o + mean_o
-    #
-    # # if means == 2:
-    # #     means_out[0] = out_model[..., 1] * std_o + mean_o
-    # #     means_out[1] = (np.maximum(out_model[..., 0], 0) + out_model[..., 1]) * std_o + mean_o
-    # #     stds_out[0] = np.exp(clip(out_model[..., 4], -5, 5)) * std_o + mean_o
-    # #     stds_out[1] = np.exp(clip(out_model[..., 3], -5, 5)) * std_o + mean_o
-    # # else:
-    # #     means_out[0] = out_model[..., 0] * std_o + mean_o
-    # #     means_out[1] = out_model[..., 1] * std_o + mean_o
-    # #     stds_out[0] = np.exp(clip(out_model[..., 4], -5, 5)) * std_o + mean_o
-    #     stds_out[1] = np.exp(
-    #         clip(np.maximum(out_model[..., 3], 0) + clip(out_model[..., 4], -5, 5), -5, 5)) * std_o + mean_o
+    for i in range(len(pd_data)):
+        group_i = pd_data['group'][i]
+        if group_i == group:
 
-    return out_mask, means_out, stds_out
-
-
-from scipy import ndimage
-def compute_labels(prediction, threshold):
-    pred_thresholded = prediction > threshold
-    labels, _ = ndimage.label(pred_thresholded)
-    return labels
-
-
-def predict_label_masks(Y_est, Y, threshold, measure):
-    predicted_images = []
-    precision_result = []
-    for i in range(len(Y)):
-        if (np.max(Y[i]) == 0 and np.min(Y[i]) == 0):
-            continue
-        else:
-            labels = compute_labels(Y_est[i], threshold)
-
-            #             plt.imshow(labels)
-            #             plt.show()
-
-            #             plt.imshow(Y[i])
-            #             plt.show()
-            tmp_score = measure(Y[i], labels)
-            predicted_images.append(labels)
-            precision_result.append(tmp_score)
-    return predicted_images, np.mean(precision_result)
-
-
-def optimize_thresholds(Y_est, Y_val, measure,verbose = True):
-    """
-     Computes average precision (AP) at different probability thresholds on validation data and returns the best-performing threshold.
-
-     Parameters
-     ----------
-     Y_est : array(float)
-         Array of estimated validation images.
-     Y_val : array(float)
-         Array of validation labels
-     model: keras model
-
-     mode: 'none', 'StarDist'
-         If `none`, consider a U-net type model, else, considers a `StarDist` type model
-     Returns
-     -------
-     computed_threshold: float
-         Best-performing threshold that gives the highest AP.
-     """
-    if verbose:
-        print('Computing best threshold: ')
-    precision_scores = []
-
-    for ts in (np.linspace(0.1, 1, 19)):
-        _, score = predict_label_masks(Y_est, Y_val, ts, measure)
-        precision_scores.append((ts, score))
-        if verbose:
-            print('Score for threshold =', "{:.2f}".format(ts), 'is', "{:.4f}".format(score))
-
-    sorted_score = sorted(precision_scores, key=lambda tup: tup[1])[-1]
-    computed_threshold = sorted_score[0]
-    best_score = sorted_score[1]
-    return computed_threshold, best_score
-
-
-import os
-
-def model_evaluation_fc(input_dic, perc_normalization=True, pmin=1, pmax=99.8):
-    X = np.random.random([5, 128, 128, 1])
-
-    # basedir = input_dic['basedir']
-    # model_name = input_dic['model_name']
-    # if os.path.exists(basedir+'/'+model_name+'/config.json'):
-    #     print('Normalization : ', model.config.normalizer)
-    #     config_dict = load_json(basedir + '/' + model_name + '/config.json')
-    #     model.config.means = config_dict['means']
-    #     model.config.stds = config_dict['stds']
-
-    model, _ = set_bioseg_model([X], input_dic, train=False)
-
-    # print(' CONFIG ::: ')
-    # print(model.config)
-    model_dic = {}
-    model_dic[0] = model
-
-    perc_normalization = perc_normalization
-    pmin = pmin
-    pmax = pmax
-
-    def model_evaluation(raw_image):
-        if perc_normalization:
-            raw_image_in = normalize(raw_image, pmin=pmin, pmax=pmax, clip=False)
-        else:
-            raw_image_in = raw_image+0
-
-        ### Evaluate Model ###
-        cont = 0
-        for key in model_dic.keys():
-            if cont == 0:
-                out_mask, means_out, stds_out = get_out_model(model_dic[key], raw_image_in)
-                #             out_mask = (out_mask - np.min(out_mask))/(np.max(out_mask)-np.min(out_mask))
+            npz_read = np.load(pd_data['input_dir'][i] + pd_data['input_file'][i])
+            image = npz_read['image']
+            if ix_label is None:
+                label = npz_read['label']
             else:
-                out_mask_aux, means_out, stds_out = get_out_model(model_dic[key], raw_image_in)
-                #             out_mask_aux = (out_mask_aux - np.min(out_mask_aux))/(np.max(out_mask_aux)-np.min(out_mask_aux))
-                out_mask += out_mask_aux
-            cont += 1
-        out_mask /= cont + 1
+                label = npz_read['label'][...,ix_label]
+            prefix_list.append([pd_data['prefix'][i]])
 
-        return out_mask
+            if X_list is None:
+                X_list = np.array(image)[np.newaxis, ...]
+            else:
+                X_list = np.concatenate([X_list, image[np.newaxis, ...]])
+            Y_gt_list.append(label)
 
-    return model_evaluation
+    ### Estimation ###
+    ix = 0
+    while ix < X_list.shape[0]:
+        nmax = np.minimum(ix + nbatch, X_list.shape[0])
+        # print(X_list.shape)
+        print('Evaluation : ', group, '; from sample ' ,ix, ' to ',nmax)
+        if (len(X_list.shape) <= 3):
+            Y_est_aux = model_evaluation(X_list[ix:nmax, ...][...,np.newaxis])
+        else:
+            Y_est_aux = model_evaluation(X_list[ix:nmax, ...])
 
-def get_best_threshold(Y_est_train, Y_fg_label_train, Y_bg_label_train, th_bins=21):
-    iou_means = []
-    th_list = np.linspace(0, 1, th_bins)
+        if ix == 0:
+            Y_est = Y_est_aux.copy()
+        else:
+            for key in Y_est.keys():
+                Y_est[key] = np.concatenate([Y_est[key], Y_est_aux[key]], axis=0)
+        ix += nbatch
+
+    Y_est_train_list = get_Yest_list(Y_est, tag=tag, tipo=1, ix_fg_list=ix_fg_list)
+
+    return Y_est_train_list, Y_gt_list, X_list,prefix_list
+
+
+# Dice Score & IoU for binary segmentation
+class Evaluator(object):
+    def __init__(self):
+        self.Dice = 0
+        self.IoU = 0
+        self.AIJ = 0
+        self.num_batch = 0
+        self.eps = 1e-4
+
+    def dice_fn(self, gt_image, pre_image):
+        eps = 1e-4
+        batch_size = pre_image.shape[0]
+
+        pre_image = pre_image.reshape(batch_size, -1).astype(np.bool)
+        gt_image = gt_image.reshape(batch_size, -1).astype(np.bool)
+
+        intersection = np.logical_and(pre_image, gt_image).sum(axis=1)
+        union = pre_image.sum(axis=1) + gt_image.sum(axis=1) + eps
+        Dice = ((2. * intersection + eps) / union).mean()
+        IoU = Dice / (2. - Dice)
+        return Dice, IoU
+
+
+    def mdice_fn(self, target, pred):
+        # This function is from :: https://github.com/naivete5656/WSISPDR/blob/master/utils/for_review.py
+        '''
+        :param target: hxw label
+        :param pred: hxw label
+        :return: mIoU, mDice
+        '''
+        iou_mean = 0.
+        dice_mean = 0.
+        labels_matched = []
+        inter_all = 0.
+        union_all = 0.
+        unmatch_all = 0.
+
+        for idx, target_label in enumerate(range(1, target.max() + 1)):
+            if np.sum(target == target_label) < 20:
+                target[target == target_label] = 0
+                # seek pred label correspond to the label of target
+            correspond_labels = pred[target == target_label]
+            correspond_labels = correspond_labels[correspond_labels != 0]
+            unique, counts = np.unique(correspond_labels, return_counts=True)
+            try:
+                max_label = unique[counts.argmax()]
+                pred_mask = np.zeros(pred.shape)
+                pred_mask[pred == max_label] = 1
+                labels_matched.append(max_label)
+            except ValueError:
+                bou_list = []
+                max_bou = target.shape[0]
+                max_bou_h = target.shape[1]
+                bou_list.extend(target[0, :])
+                bou_list.extend(target[max_bou - 1, :])
+                bou_list.extend(target[:, max_bou_h - 1])
+                bou_list.extend(target[:, 0])
+                bou_list = np.unique(bou_list)
+                for x in bou_list:
+                    target[target == x] = 0
+                pred_mask = np.zeros(pred.shape)
+
+            # create mask
+            target_mask = np.zeros(target.shape)
+            target_mask[target == target_label] = 1
+            pred_mask = pred_mask.flatten()
+            target_mask = target_mask.flatten()
+
+            tp = pred_mask.dot(target_mask)
+            fn = pred_mask.sum() - tp
+            fp = target_mask.sum() - tp
+            inter_all += tp
+            union_all += tp + fp + fn
+
+            iou = ((tp + self.eps) / (tp + fp + fn + self.eps))
+            dice = (2 * tp + self.eps) / (2 * tp + fn + fp + self.eps)
+            iou_mean = (iou_mean * idx + iou) / (idx + 1)
+            dice_mean = (dice_mean * idx + dice) / (idx + 1)
+
+        for i in np.unique(pred):
+            if (i != 0) & (i not in labels_matched):
+                unmatch_all += np.sum(pred==i)
+        aij = inter_all/(union_all+unmatch_all)
+
+        return dice_mean, iou_mean, aij
+
+    def add_pred(self, gt_image, pre_image):
+        pre_image = measure.label(pre_image)
+        pre_image = morphology.remove_small_objects(pre_image, min_size=20)
+        pre_image = binary_fill_holes(pre_image > 0)
+        pre_image = measure.label(pre_image)
+
+        batch_mdice, batch_miou, batch_aij = self.mdice_fn(gt_image, pre_image)
+        self.Dice = (self.Dice * self.num_batch + batch_mdice) / (self.num_batch + 1)
+        self.IoU = (self.IoU * self.num_batch + batch_miou) / (self.num_batch + 1)
+        self.AIJ = (self.AIJ * self.num_batch + batch_aij) / (self.num_batch + 1)
+        self.num_batch += 1
+
+    def reset(self):
+        self.Dice = 0
+        self.IoU = 0
+        self.AIJ = 0
+        self.num_batch = 0
+
+
+def single_eval(label_gt,mask_th):
+    performance = Evaluator()
+    performance.add_pred(label_gt,mask_th)
+    return [performance.IoU,performance.Dice,performance.AIJ]
+
+def evaluate_thresholds(label_gt, prob_est, th_list=None):
+    if th_list is None:
+        th_list = np.linspace(0, 1, 21)[1:-1]
+
+    values = []
     for th in th_list:
+        mask_th = np.zeros_like(prob_est)
+        mask_th[prob_est >= th] = 1
+        IoU, Dice, AIJ = single_eval(label_gt, mask_th)
 
-        iou_list = []
-        for i in range(len(Y_est_train)):
-            Y_est = Y_est_train[i]
-            Y_fg = Y_fg_label_train[i]
-            Y_bg = Y_bg_label_train[i]
+        mask_gt = np.zeros_like(label_gt)
+        mask_gt[label_gt>0] = 1
+        F1 = f1_score(mask_gt.flatten(),mask_th.flatten())
+        Jacc = jaccard_score(mask_gt.flatten(),mask_th.flatten())
+        Acc = accuracy_score(mask_gt.flatten(), mask_th.flatten())
 
-            Y_est_th = np.zeros_like(Y_est)
-            Y_est_th[Y_est >= th] = 1
 
-            iou = np.sum(Y_est_th * Y_fg) + np.sum((1 - Y_est_th) * Y_bg)
-            iou = iou / np.sum(Y_fg + Y_bg)
-            iou_list.append(iou)
-        iou_list = np.array(iou_list)
-        # print(th, iou_list.mean())
-        iou_means.append(iou_list.mean())
+        values.append([th, IoU, Dice, AIJ, F1, Jacc, Acc])
+    return values
 
-    iou_means = np.array(iou_means)
-    ix = np.argmax(iou_means)
-    threshold = th_list[ix]
-    iou_best = iou_means[ix]
+def get_performance(Y_est_plot, Y_gt_plot, th_list=None):
+    stats = None
+    print('Evaluation i/nsamples')
+    for i in range(len(Y_est_plot)):
+        print(i,len(Y_est_plot))
+        mask_gt = np.zeros_like(Y_gt_plot[i])
+        mask_gt[Y_gt_plot[i] > 0] = 1.0
+        label_gt = measure.label(mask_gt)
 
-    print('Best : ', threshold, iou_best)
+        auc = roc_auc_score(y_true=1 - mask_gt.flatten(), y_score=1 - Y_est_plot[i].flatten())
 
-    return threshold, iou_best
+        values = evaluate_thresholds(label_gt, Y_est_plot[i], th_list=th_list)
+        values = np.array(values)
+        values = np.concatenate([values, (np.ones([values.shape[0]]) * auc)[:, np.newaxis]], axis=1)
+
+        stats_i = np.concatenate([values, (np.ones([values.shape[0]]) * i)[:, np.newaxis]], axis=1)
+        if stats is None:
+            stats = np.array(stats_i)
+        else:
+            stats = np.concatenate([stats, stats_i], axis=0)
+
+    pd_stats = pd.DataFrame(stats, columns=['th', 'IoU', 'Dice', 'AIJ', 'F1','Jacc','Acc','auc', 'index'])
+    return pd_stats
+
+
+def get_best(pd_stats,metric_list = ['IoU', 'Dice', 'AIJ','F1',	'Jacc',	'Acc','auc']):
+    best_values = []
+    for index in pd_stats['index'].unique():
+
+        best_aux = []
+        pd_loc = pd_stats.loc[pd_stats['index'] == index]
+        #     patch = pd_loc['patch'].unique()[0]
+        #     prefix = pd_loc['prefix'].unique()[0]
+        #     pd_loc = pd_stats_train.loc[(pd_stats_train.patch == patch) & (pd_stats_train.prefix == prefix)]
+
+        #         print(index,patch,prefix)
+        for metric in metric_list:
+            best_aux.append(pd_loc[metric].max())
+        best_aux.append(pd_loc['group'].unique()[0])
+        best_aux.append(pd_loc['prefix'].unique()[0])
+        best_values.append(best_aux)
+
+    metric_list.extend(['group', 'prefix'])
+    pd_best = pd.DataFrame(data=best_values, columns=metric_list)
+    return pd_best
+
+
+def get_best_th(pd_stats,metric_list = ['IoU', 'Dice', 'AIJ','F1',	'Jacc',	'Acc']):
+    best_value = {}
+    best_th = {}
+
+    for th in pd_stats['th'].unique():
+        pd_loc = pd_stats.loc[pd_stats['th'] == th]
+        for metric in metric_list:
+            mvalue = pd_loc[metric].mean()
+            if metric in best_value.keys():
+                if best_value[metric] < mvalue:
+                    best_value[metric] = mvalue
+                    best_th[metric] = th
+            else:
+                best_value[metric] = mvalue
+                best_th[metric] = th
+    return best_value, best_th
+
+
+def get_stats_th(pd_stats, best_th,metric_list = ['IoU', 'Dice', 'AIJ','F1','Jacc',	'Acc']):
+    best_values = []
+    for index in pd_stats['index'].unique():
+
+        best_aux = []
+        pd_loc = pd_stats.loc[pd_stats['index'] == index]
+        #     patch = pd_loc['patch'].unique()[0]
+        #     prefix = pd_loc['prefix'].unique()[0]
+        #     pd_loc = pd_stats_train.loc[(pd_stats_train.patch == patch) & (pd_stats_train.prefix == prefix)]
+
+        #         print(index,patch,prefix)
+        for metric in metric_list:
+            th_metric = best_th[metric]
+            pd_filter = pd_loc.loc[pd_loc['th'] == th_metric]
+            best_aux.append(pd_filter[metric].mean())
+        best_aux.append(pd_loc['auc'].mean())
+        best_aux.append(pd_loc['group'].unique()[0])
+        best_aux.append(pd_loc['prefix'].unique()[0])
+
+        best_values.append(best_aux)
+    metric_list.extend(['auc', 'group', 'prefix'])
+    pd_best = pd.DataFrame(data=best_values, columns=metric_list)
+    return pd_best
+
+
+def get_seg_image(X,Y,th=0,min_size = 20):
+    Y_plot = np.zeros_like(Y)
+    Y_plot[Y>th]=1
+    Y_plot = morphology.remove_small_objects(Y_plot.astype('bool'), min_size=min_size)
+    Y_plot = binary_fill_holes(Y_plot > 0)
+    Y_plot = Y_plot.astype('int')
+    Y_plot = morphology.dilation(Y_plot, selem=morphology.disk(1)) - Y_plot
+
+    implot = np.zeros([X.shape[0], X.shape[1], 3])
+    # print(X.shape, Y_plot.shape)
+    implot[..., :] = (normalize(X, pmin=1, pmax=99, clip=True) * 0.9 *(1-Y_plot))[...,np.newaxis]
+    implot[..., 0] += Y_plot
+    # implot[..., 1] = (1 - Y_plot) * implot[..., 1]
+
+    return implot
+
+
+

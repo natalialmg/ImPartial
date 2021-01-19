@@ -8,9 +8,10 @@ from n2v.utils.n2v_utils import *
 from six import string_types
 from csbdeep.utils.six import Path, FileNotFoundError
 from csbdeep.internals import nets, predict
+from csbdeep.utils import normalize
 import datetime
 
-from BioSeg_dataloaders import BioSeg_DataWrapper, manipulate_val_data
+from BioSeg_dataloaders import BioSeg_DataWrapper, manipulate_val_data, subpatch_2D
 from losses import *
 from BioSeg_config import *
 from utils import *
@@ -123,63 +124,48 @@ class BioSeg_standard(CARE):
         weights = self.config.weights_objectives
         backfore_distribution = self.config.distributions
 
-        if loss in ['demixmultiple_prob','CE_demixmultiple_prob']:
-            # print('masked')
-            isinstance(optimizer, Optimizer) or _raise(ValueError())
-            loss_standard = eval('loss_{}(relative_weights = {},type_loss = "full", type_rec = "{}")'.format(loss, weights,backfore_distribution))
-
-            _metrics = []
-            _metrics.append(eval('loss_{}(type_loss = "rec", type_rec = "{}")'.format(loss, backfore_distribution)))
-            _metrics.append(eval('loss_{}(type_loss = "entropy", type_rec = "{}")'.format(loss, backfore_distribution)))
-            if self.config.multi_objective:
-                print('MULTI')
-                _metrics.append(eval('loss_{}(type_loss = "bg_error")'.format(loss)))
-                _metrics.append(eval('loss_{}(type_loss = "fg_error")'.format(loss)))
-
-            callbacks = [TerminateOnNaN()]
-
-            # compile model
-            model.compile(optimizer=optimizer, loss=loss_standard, metrics=_metrics)
-
-            return callbacks
-
-
         if loss in ['demix']:
             # print('masked')
+            # print(self.config.n_instance_seg)
             isinstance(optimizer, Optimizer) or _raise(ValueError())
             loss_standard = eval('loss_{}(relative_weights = {},type_loss = "full",'
                                  ' type_rec = "{}",patch_size = "{}",nchannels="{}" ,'
-                                 'nback ="{}", nfore="{}", ninstance ="{}",std ="{}", mean ="{}")'.format(loss, weights,backfore_distribution,
+                                 'nback ="{}", nfore="{}",'
+                                 'nbacki ="{}", nforei="{}", ninstance ="{}",std ="{}", mean ="{}")'.format(loss, weights,backfore_distribution,
                                                                                               self.config.n2v_patch_shape,self.config.n_channel_in,self.config.n_back_modes,
-                                                                                    self.config.n_fore_modes, self.config.n_instance_seg,
+                                                                                    self.config.n_fore_modes,self.config.n_back_i_modes,self.config.n_fore_i_modes, self.config.n_instance_seg,
                                                                                                           self.config.fit_std,self.config.fit_mean))
 
-            _metrics = []
+            _metrics = [] #rec
             _metrics.append(eval('loss_{}(relative_weights = {},type_loss = "rec",'
                                  ' type_rec = "{}",patch_size = "{}",nchannels="{}" ,'
-                                 'nback ="{}", nfore="{}", ninstance ="{}",std ="{}", mean ="{}")'.format(loss, weights,backfore_distribution,
+                                 'nback ="{}", nfore="{}",'
+                                 'nbacki ="{}", nforei="{}", ninstance ="{}",std ="{}", mean ="{}")'.format(loss, weights,backfore_distribution,
                                                                                               self.config.n2v_patch_shape,self.config.n_channel_in,self.config.n_back_modes,
-                                                                                    self.config.n_fore_modes, self.config.n_instance_seg,
+                                                                                    self.config.n_fore_modes,self.config.n_back_i_modes,self.config.n_fore_i_modes, self.config.n_instance_seg,
                                                                                                           self.config.fit_std,self.config.fit_mean)))
             _metrics.append(eval('loss_{}(relative_weights = {},type_loss = "entropy",'
                                  ' type_rec = "{}",patch_size = "{}",nchannels="{}" ,'
-                                 'nback ="{}", nfore="{}", ninstance ="{}",std ="{}", mean ="{}")'.format(loss, weights,backfore_distribution,
+                                 'nback ="{}", nfore="{}",'
+                                 'nbacki ="{}", nforei="{}", ninstance ="{}",std ="{}", mean ="{}")'.format(loss, weights,backfore_distribution,
                                                                                               self.config.n2v_patch_shape,self.config.n_channel_in,self.config.n_back_modes,
-                                                                                    self.config.n_fore_modes, self.config.n_instance_seg,
+                                                                                    self.config.n_fore_modes,self.config.n_back_i_modes,self.config.n_fore_i_modes, self.config.n_instance_seg,
                                                                                                           self.config.fit_std,self.config.fit_mean)))
             if self.config.multi_objective:
-                print('MULTI')
-                _metrics.append(eval('loss_{}(relative_weights = {},type_loss = "bg_error",'
+                # print('MULTI')
+                _metrics.append(eval('loss_{}(relative_weights = {},type_loss = "multich_seg_error",'
                                  ' type_rec = "{}",patch_size = "{}",nchannels="{}" ,'
-                                 'nback ="{}", nfore="{}", ninstance ="{}",std ="{}", mean ="{}")'.format(loss, weights,backfore_distribution,
+                                 'nback ="{}", nfore="{}",'
+                                 'nbacki ="{}", nforei="{}", ninstance ="{}",std ="{}", mean ="{}")'.format(loss, weights,backfore_distribution,
                                                                                               self.config.n2v_patch_shape,self.config.n_channel_in,self.config.n_back_modes,
-                                                                                    self.config.n_fore_modes, self.config.n_instance_seg,
+                                                                                    self.config.n_fore_modes,self.config.n_back_i_modes,self.config.n_fore_i_modes, self.config.n_instance_seg,
                                                                                                           self.config.fit_std,self.config.fit_mean)))
-                _metrics.append(eval('loss_{}(relative_weights = {},type_loss = "fg_error",'
+                _metrics.append(eval('loss_{}(relative_weights = {},type_loss = "seg_error",'
                                  ' type_rec = "{}",patch_size = "{}",nchannels="{}" ,'
-                                 'nback ="{}", nfore="{}", ninstance ="{}",std ="{}", mean ="{}")'.format(loss, weights,backfore_distribution,
+                                 'nback ="{}", nfore="{}",'
+                                 'nbacki ="{}", nforei="{}", ninstance ="{}",std ="{}", mean ="{}")'.format(loss, weights,backfore_distribution,
                                                                                               self.config.n2v_patch_shape,self.config.n_channel_in,self.config.n_back_modes,
-                                                                                    self.config.n_fore_modes, self.config.n_instance_seg,
+                                                                                    self.config.n_fore_modes,self.config.n_back_i_modes,self.config.n_fore_i_modes, self.config.n_instance_seg,
                                                                                                           self.config.fit_std,self.config.fit_mean)))
 
             callbacks = [TerminateOnNaN()]
@@ -263,6 +249,16 @@ class BioSeg_standard(CARE):
         """
         leave_center = self.config.n2v_leave_center
         scale_augmentation = self.config.scale_aug
+
+        ## Resize validation if necessary....
+        print((np.sum(np.abs(np.array(validation_data[0][1:-1]) - np.array(self.config.n2v_patch_shape))) != 0))
+        if (np.sum(np.abs(np.array(validation_data[0][1:-1]) - np.array(self.config.n2v_patch_shape))) != 0) :
+            X_val = subpatch_2D(validation_data[0], np.array(self.config.n2v_patch_shape))
+            Y_val = subpatch_2D(validation_data[1], np.array(self.config.n2v_patch_shape))
+            validation_data = (X_val,Y_val)
+
+
+
 
         ((isinstance(validation_data,(list,tuple)) and len(validation_data)==2)
             or _raise(ValueError('validation_data must be a pair of numpy arrays')))
@@ -358,6 +354,9 @@ class BioSeg_standard(CARE):
                                           axis=axes.index('C'))
 
         # print(validation_Y.shape, validation_X.shape)
+
+
+
 
         manipulate_val_data(validation_X, validation_Y,
                                       perc_pix=self.config.n2v_perc_pix,
@@ -467,151 +466,149 @@ class BioSeg_standard(CARE):
     def __denormalize__(self, data, means, stds):
         return (data * stds) + means
 
-def set_bioseg_model(data, input_dic, train=True):
-    mkdir(input_dic['basedir'])
+def set_bioseg_model(basedir, model_name, BioConfig, load_tf_file = '', load_model=False, seed = 0):
+    mkdir(basedir)
 
-    basedir = input_dic['basedir']
-    model_name = input_dic['model_name']
-    X_train = data[0]
-    if train:
-        Y_train = data[1]
-        X_val = data[2]
-        Y_val = data[3]
-
-    print('Training specs')
-    # print('base_dir (model_dir) : ', input_dic['basedir'])
-    print('model name : ', model_name)
-    print()
-    print('model file : ',basedir+model_name+'/weights_best.h5')
+    print('------------------  BioSeg setup  -------------------------')
+    print('basedir/model name : ', basedir+model_name)
+    print('model file : ',basedir+model_name+'/'+BioConfig.train_checkpoint)
     print()
 
-    weights = input_dic['weights'].split('_')
-    weights = [float(w) for w in weights]
-    weights /= np.sum(weights)
-    weights = list(weights)
+    if seed > 0:
+        tf.set_random_seed(seed)
 
-    BioConfig = BioSegConfig(X_train, channel_denoised=input_dic['channel_denoised'],
-                      multi_objective=input_dic['multi_objective'], unet_kern_size=3,
-                      train_steps_per_epoch=input_dic['steps_per_epoch'],
-                      n_channel_out=input_dic['n_channel_out'],
-                      train_epochs=input_dic['epochs'], train_loss=input_dic['train_loss'],
-                      normalizer=input_dic['normalizer'],
-                      batch_norm=input_dic['batchnorm'], train_batch_size=input_dic['train_batch_size'],
-                             n2v_patch_shape=input_dic['n2v_patch_shape'],
-                      n2v_manipulator=input_dic['n2v_man'],
-                      n2v_neighborhood_radius=input_dic['n2v_radius'],
-                      structN2Vmask=input_dic['structN2Vmask'],
-                             train_learning_rate=input_dic['lr'],
-                             weights_objectives=weights,
-                             distributions =input_dic['backfore_distribution'],
-                             n2v_leave_center =input_dic['leave_center'],
-                             scale_aug = input_dic['scale_aug'],
-                             unet_n_depth=input_dic['unet_n_depth'])
-
-    tf.set_random_seed(input_dic['seed'])
-
-    load_tf_file = input_dic['load_tf_file']
-    if not train:
-        print('EVALUATION')
-        print(basedir+model_name+'/config.json')
+    if load_model:
+        print('** Loading Model Config **')
+        print()
         if os.path.exists(basedir+model_name+'/config.json'):
-            print('Loading previous config file :: ')
-            print(basedir+model_name+'/config.json')
-            # print('Normalization : ', input_dic['normalizer'])
+
+            print('Loading previous config file : ')
             config_dict = load_json(basedir + model_name + '/config.json')
             BioConfig = BioSegConfig(np.array([]), **config_dict)
-            # BioConfig.means = config_dict['means']
-            # BioConfig.stds = config_dict['stds']
+            print(basedir + model_name + '/config.json')
+            if load_tf_file == '': #load default best model in folder
+                load_tf_file = basedir+model_name+'/'+BioConfig.train_checkpoint
 
-            load_tf_file = basedir+model_name+'/weights_best.h5'
-            print('Loading load_tf_file :: ')
-            print(basedir,model_name)
-
-    # print('LOAD MODEL FILE :: ')
-    # print(load_tf_file)
-
+    print('** Create Model **')
+    print()
     print(BioConfig)
-    # print(BioConfig.is_valid(return_invalid=True))
 
-    model = BioSeg_standard(BioConfig, model_name, basedir=input_dic['basedir'])
+    model = BioSeg_standard(BioConfig, model_name, basedir=basedir)
     model.prepare_for_training()
 
     if os.path.exists(load_tf_file):
-        print('Loading Model ', load_tf_file)
+        print('Loading model weights : ', load_tf_file)
         model.keras_model.load_weights(load_tf_file)
     else:
         print('Model with random initialization')
 
-    history = []
-    if train:
+    return model
+
+def model_trainer_fc(model):
+
+    def trainer(data):
+        X_train = data[0]
+        Y_train = data[1]
+        X_val = data[2]
+        Y_val = data[3]
+
         history = model.train(X_train, Y_train, (X_val, Y_val))
 
-        ## PLOT LOSSES ###
         history = history.history
-        # model.keras_model.save_weights(export_tf_filename)
 
-    save_data_model = {}
-    save_data_model['history'] = history
-    save_data_model['basedir'] = basedir
-    save_data_model['model_folder'] = model_name
-    save_data_model['input_dic'] = input_dic
+        save_data_model = {}
+        save_data_model['history'] = history
+        save_data_model['basedir'] = model.basedir
+        save_data_model['model_folder'] = model.name
 
-    return model,save_data_model
+        return save_data_model
 
-from skimage import morphology
-def make_definput_dic(n2v_struct_radius = 0):
-    config = make_defconfig()
+    return trainer
 
-    # train_steps_per_epoch = int(X_train.shape[0] / config.train_batch_size)
-    train_steps_per_epoch = 50
-
-    input_dic = {}
-    input_dic['channel_denoised'] = config.channel_denoised
-    input_dic['multi_objective'] = config.multi_objective
-    input_dic['train_steps_per_epoch']= train_steps_per_epoch
-    input_dic['train_batch_size']=config.train_batch_size
-    input_dic['n_channel_out']=config.n_channel_out
-    input_dic['train_epochs']=config.epochs
-    input_dic['train_loss']= config.train_loss #denoise_prob #'denoise_laplace' #demix_semisup
-    input_dic['normalizer']= config.normalizer #input normalizer type
-    input_dic['seed']= config.seed
-
-    input_dic['unet_n_depth'] = config.unet_n_depth
-    input_dic['n2v_patch_shape']=(128,128)
-    input_dic['n2v_perc_pix']=0.198
-    input_dic['weights_objectives']= [0.4,0.0,0.3,0.3] #weights for multiobjectives
-    input_dic['n2v_man'] = config.n2v_man #manipulator
-    input_dic['leave_center'] = config.leave_center
-    input_dic['scale_aug'] = config.scale_aug
-
-    input_dic['model_name'] = config.model_name
-    input_dic['basedir'] = config.basedir
-    input_dic['lr'] = config.lr
-
-    input_dic['n2v_neighbor_radius'] = config.n2v_radius  # neighbor radius to sample from
-    input_dic['n2v_struct_radius'] = n2v_struct_radius # disk radius of inputation structure
-    input_dic['batchnorm'] = config.batchnorm
-    input_dic['load_tf_file'] = config.load_tf_file
-
-    if input_dic['n2v_struct_radius'] == 0:
-        structN2Vmask = None
+def model_demix_prediction(model, input_image):
+    if len(input_image.shape) == 4:
+        y_pred = model.predict(input_image, 'SYXC')
     else:
-        structN2Vmask = morphology.disk(input_dic['n2v_struct_radius'])
-        structN2Vmask = structN2Vmask.tolist()
+        if len(input_image.shape) == 3:
+            y_pred = model.predict(input_image, 'YXC')
+        else:
+            y_pred = model.predict((input_image), 'YX')
 
-    input_dic['structN2Vmask'] = structN2Vmask
-    input_dic['backfore_distribution'] = config.bf_dist
-    return input_dic
+    if len(y_pred.shape) <= 3:
+        y_pred = y_pred[np.newaxis, ...]
 
-def model_trainer_fc(data, input_dic):
-    _, save_data = set_bioseg_model(data, input_dic, train=True)
-    return save_data
+    nfore = model.config.n_fore_modes
+    nback = model.config.n_back_modes
+    nchannels = model.config.n_channel_in
+    ncomponents = model.config.n_components
+    ninstance = model.config.n_instance_seg
+    nfore_instance = model.config.n_fore_i_modes
+    nback_instance = model.config.n_back_i_modes
 
+    patch_size = (y_pred.shape[1], y_pred.shape[2])
 
+    Y_est = {}
 
+    ix = 0
+    foreback_pred = y_pred[..., ix:ix + (nfore + nback) * nchannels * ncomponents]
+    # print(foreback_pred.shape)
 
+    if ninstance>0:
+        ix += (nfore + nback) * nchannels * ncomponents
+        instance_pred = y_pred[..., ix:ix + ninstance * (nfore_instance+nback_instance)]
+    # instance_pred = y_pred[..., ix:]
 
+    ## Foreback mask !!
+    foreback_pred = tf.reshape(foreback_pred, [-1, patch_size[0], patch_size[1],
+                                               nchannels, nfore + nback, ncomponents])
+    foreback_mask = tf.nn.softmax(foreback_pred[..., 0],
+                                  axis=-1)  # component 0 is the mixing image, 1 and 2 are mean and std
+    foreback_mask = foreback_mask.eval()
 
+    for ch in range(nchannels):
+        Y_est['channel_' + str(ch)] = foreback_mask[:, :, :, ch, :]
+        Y_est['params_channel_'+ str(ch)] = foreback_pred[:, :, :, ch, :,1:].eval()
+
+    #
+    # foreback_mask = np.reshape(foreback_mask, (foreback_mask.shape[0],
+    #                                            foreback_mask.shape[1],
+    #                                            foreback_mask.shape[2], -1))
+
+    if ninstance>0:
+        ## Instance mask !!
+        instance_pred = tf.reshape(instance_pred, [-1, patch_size[0], patch_size[1],
+                                                   ninstance, nfore_instance+nback_instance])
+        instance_mask = tf.nn.softmax(instance_pred, axis=-1)
+        instance_mask = instance_mask.eval()
+        for ni in range(ninstance):
+            Y_est['instance_' + str(ni)] = instance_mask[:, :, :, ni, :]
+
+    # instance_mask = np.reshape(instance_mask, (instance_mask.shape[0],
+    #                                            instance_mask.shape[1],
+    #                                            instance_mask.shape[2], -1))
+
+    # print('foreback/Instance mask shape : ',foreback_mask.shape,instance_mask.shape)
+
+    return Y_est
+
+def model_evaluation_fc(model, perc_normalization=True, pmin=1, pmax=99.8):
+
+    perc_normalization = perc_normalization
+    pmin = pmin
+    pmax = pmax
+
+    def model_evaluation(raw_image):
+        if perc_normalization:
+            raw_image_in = normalize(raw_image, pmin=pmin, pmax=pmax, clip=False)
+        else:
+            raw_image_in = raw_image + 0
+
+        ### Evaluate Model ###
+        Y_est = model_demix_prediction(model, raw_image_in)
+
+        return Y_est
+
+    return model_evaluation
 
 
 

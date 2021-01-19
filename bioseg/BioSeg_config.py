@@ -14,10 +14,8 @@ class BioSegConfig(argparse.Namespace):
 
         if  X.size != 0:
 
-            # print(' X SHAPE !!!!!!: ',X.shape)
             assert len(X.shape) == 4 or len(X.shape) == 5, "Only 'SZYXC' or 'SYXC' as dimensions is supported."
 
-            # print(len(X.shape) - 2)
             n_dim = len(X.shape) - 2
 
             if n_dim == 2:
@@ -63,13 +61,13 @@ class BioSegConfig(argparse.Namespace):
                 self.n_channel_in = X.shape[-1]
             else:
                 self.n_channel_in = 1
-            self.train_loss = 'demixmultiple_prob'
+            self.train_loss = 'demix'
 
             # default config (can be overwritten by kwargs below)
 
             self.unet_n_depth = 2
             self.unet_kern_size = 3
-            self.unet_n_first = 32
+            self.unet_n_first = 64
             self.unet_last_activation = 'linear'
             self.probabilistic = False
             self.unet_residual = False
@@ -81,8 +79,8 @@ class BioSegConfig(argparse.Namespace):
             # fixed parameters
             self.train_epochs = 200
             self.train_steps_per_epoch = 50
-            self.train_learning_rate = 0.0001
-            self.train_batch_size = 128
+            self.train_learning_rate = 0.0004
+            self.train_batch_size = 64
             self.train_tensorboard = False
             self.train_checkpoint = 'weights_best.h5'
             self.train_checkpoint_last  = 'weights_last.h5'
@@ -90,7 +88,7 @@ class BioSegConfig(argparse.Namespace):
             self.train_reduce_lr = {'monitor': 'val_loss', 'factor': 0.5, 'patience': 10}
             self.batch_norm = False
             self.n2v_perc_pix = 1.5
-            self.n2v_patch_shape = (64, 64) if self.n_dim == 2 else (64, 64, 64)
+            self.n2v_patch_shape = (128, 128) if self.n_dim == 2 else (64, 64, 64)
             self.n2v_manipulator = 'uniform_withCP'
             self.n2v_neighborhood_radius = 5
 
@@ -100,27 +98,25 @@ class BioSegConfig(argparse.Namespace):
             self.channel_denoised = False
             self.multi_objective = True
             self.normalizer = 'none'
-            self.weights_objectives = [0.01, 0.25, 0.25, 0.49]
+            self.weights_objectives = [0.1, 0, 0.45, 0.45]
             self.distributions = 'gauss'
             self.n2v_leave_center = False
-            self.scale_aug = True
+            self.scale_aug = False
             self.structN2Vmask = None
 
             self.n_back_modes = 2
-            self.n_fore_modes = 1
-            self.n_instance_seg = 1
+            self.n_fore_modes = 2
+            self.n_instance_seg = 0
+            self.n_back_i_modes = 1
+            self.n_fore_i_modes = 1
 
-            self.fit_std = True
+            self.fit_std = False
             self.fit_mean = True
 
-            self.n_components = 3 if (self.fit_std & self.fit_mean) else 2
 
-            self.n_channel_out = (self.n_back_modes + self.n_fore_modes) * self.n_channel_in * self.n_components + self.n_instance_seg * 2
 
-        try:
-            kwargs['n_channel_out'] = (self.n_back_modes + self.n_fore_modes) * self.n_channel_in * self.n_components + self.n_instance_seg * 2
-        except:
-            pass
+            # self.n_channel_out = (self.n_back_modes + self.n_fore_modes) * self.n_channel_in * self.n_components +\
+            #                      self.n_instance_seg * (self.n_back_i_modes+self.n_fore_i_modes)
 
         try:
             kwargs['probabilistic'] = False
@@ -137,6 +133,16 @@ class BioSegConfig(argparse.Namespace):
 
             # print(k,  kwargs[k])
             setattr(self, k, kwargs[k])
+        self.n_components = 3 if (self.fit_std & self.fit_mean) else 2
+        self.n_channel_out = (self.n_back_modes + self.n_fore_modes) * self.n_channel_in * self.n_components + \
+                             self.n_instance_seg * (self.n_back_i_modes + self.n_fore_i_modes)
+
+
+        # try:
+        #     kwargs['n_channel_out'] = (self.n_back_modes + self.n_fore_modes) * self.n_channel_in * self.n_components +\
+        #                               self.n_instance_seg * (self.n_back_i_modes+self.n_fore_i_modes)
+        # except:
+        #     pass
 
     def is_valid(self, return_invalid=False):
 
@@ -226,16 +232,19 @@ def make_defconfig():
     if config_dict['n2v_struct_radius'] == 0:
         config_dict['structN2Vmask'] = None
     else:
-        structN2Vmask = morphology.disk(config.n2v_struct_radius)
+        structN2Vmask = morphology.disk(config_dict['n2v_struct_radius'])
         config_dict['structN2Vmask'] = structN2Vmask.tolist()
 
     config_dict['steps_per_epoch'] = 50
     config_dict['n2v_patch_shape'] = (128,128)
     config_dict['backfore_distribution'] = 'gauss'
-
-    print(config_dict)
-    # for key in config_dict.keys():
-    #     setattr(config, key, config_dict[key])
-
+    config_dict['n_back_modes'] = 2
+    config_dict['n_fore_modes'] = 1
+    config_dict['n_back_i_modes'] = 2
+    config_dict['n_fore_i_modes'] = 1
+    config_dict['n_instance_seg'] = 1
+    config_dict['fit_std'] = True
+    config_dict['fit_mean'] = True
+    config_dict['unet_n_first'] = 32
 
     return config_dict
