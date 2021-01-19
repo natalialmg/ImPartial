@@ -1,0 +1,3 @@
+input_dir,input_file,prefix,scribble_file,total_labels_ch0,scribble_labels_ch0,total_labels_ch1,scribble_labels_ch1,total_labels_ch2,scribble_labels_ch2
+/data/natalia/intern20/PaperData/MIBI_2channel/,image0.npz,image0,image0_scribble_n100.npz,161,17,153,19,161,15
+/data/natalia/intern20/PaperData/MIBI_2channel/,image1.npz,image1,image1_scribble_n100.npz,73,19,62,17,78,13

@@ -1,0 +1,9 @@
+,prefix,input_dir,input_file,group
+0,image0,/data/natalia/intern20/PaperData/MIBI_1channel/,image0.npz,train
+1,image1,/data/natalia/intern20/PaperData/MIBI_1channel/,image1.npz,test
+2,image2,/data/natalia/intern20/PaperData/MIBI_1channel/,image2.npz,test
+3,image3,/data/natalia/intern20/PaperData/MIBI_1channel/,image3.npz,train
+4,image4,/data/natalia/intern20/PaperData/MIBI_1channel/,image4.npz,test
+5,image5,/data/natalia/intern20/PaperData/MIBI_1channel/,image5.npz,train
+6,image6,/data/natalia/intern20/PaperData/MIBI_1channel/,image6.npz,test
+7,image7,/data/natalia/intern20/PaperData/MIBI_1channel/,image7.npz,train

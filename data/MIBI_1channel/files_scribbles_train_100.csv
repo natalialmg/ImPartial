@@ -1,0 +1,5 @@
+input_dir,input_file,prefix,scribble_file,total_labels,scribble_labels
+/data/natalia/intern20/PaperData/MIBI_1channel/,image0.npz,image0,image0_scribble_n100.npz,246,27
+/data/natalia/intern20/PaperData/MIBI_1channel/,image3.npz,image3,image3_scribble_n100.npz,226,27
+/data/natalia/intern20/PaperData/MIBI_1channel/,image5.npz,image5,image5_scribble_n100.npz,324,24
+/data/natalia/intern20/PaperData/MIBI_1channel/,image7.npz,image7,image7_scribble_n100.npz,97,24

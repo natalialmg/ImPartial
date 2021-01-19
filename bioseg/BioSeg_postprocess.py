@@ -324,7 +324,11 @@ def get_seg_image(X,Y,th=0,min_size = 20):
 
     implot = np.zeros([X.shape[0], X.shape[1], 3])
     # print(X.shape, Y_plot.shape)
-    implot[..., :] = (normalize(X, pmin=1, pmax=99, clip=True) * 0.9 *(1-Y_plot))[...,np.newaxis]
+    if len(X.shape)>2:
+        implot[..., 1] = (normalize(X[...,0], pmin=1, pmax=99, clip=True) * 0.9 * (1 - Y_plot))
+        implot[..., 2] = (normalize(X[...,1], pmin=1, pmax=99, clip=True) * 0.9 * (1 - Y_plot))
+    else:
+        implot[..., :] = (normalize(X, pmin=1, pmax=99, clip=True) * 0.9 *(1-Y_plot))[...,np.newaxis]
     implot[..., 0] += Y_plot
     # implot[..., 1] = (1 - Y_plot) * implot[..., 1]
 
